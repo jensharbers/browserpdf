@@ -111,7 +111,8 @@
   button.icon-only{ padding: 8px; }
   button.danger-ghost{ color: var(--text); }
   button.danger-ghost:hover{ border-color: var(--brick); color: #f2b6a5; }
-  input[type=file]{ display:none; }
+  /* nicht display:none – manche mobilen Browser öffnen den Dateidialog sonst nicht */
+  input[type=file]{ position:absolute; width:1px; height:1px; opacity:0; overflow:hidden; pointer-events:none; }
   .icon{ width:14px; height:14px; flex:none; }
   .icon-lg{ width:17px; height:17px; flex:none; }
 
@@ -916,7 +917,9 @@ async function processFiles(fileList){
 }
 
 fileInput.addEventListener('change', async (e) => {
-  const files = e.target.files;
+  // Dateien VOR dem Zurücksetzen in ein Array kopieren: manche Browser leeren
+  // sonst die (live) FileList, sobald value = '' gesetzt wird.
+  const files = Array.from(e.target.files || []);
   fileInput.value = '';
   await processFiles(files);
 });
