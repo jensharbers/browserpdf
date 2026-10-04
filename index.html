@@ -182,6 +182,11 @@
     margin-right: 6px;
   }
   .bulk-bar button{ font-size: 12.5px; padding: 7px 11px; }
+  .bulk-bar .bulk-hint{ font-size: 12.5px; color: var(--text); flex: 1 1 200px; }
+  .bulk-bar.has-sel .bulk-hint{ display:none; }
+  .bulk-bar:not(.has-sel) .bulk-sel-only{ display:none !important; }
+  .bulk-bar:not(.has-sel) .label{ display:none; }
+  .bulk-bar.has-sel #bulkExtract{ margin-left:auto; }
 
   /* ---------- inline config bars (watermark / header-footer) ---------- */
   .inline-bar{
@@ -501,23 +506,11 @@
       </button>
     </div>
     <div class="sep"></div>
-    <div style="position:relative;">
-      <button id="exportBtn" class="primary" disabled>
-        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/></svg>
-        Exportieren
-      </button>
-      <div class="popover" id="exportPopover">
-        <button data-act="all">Alle zusammenführen</button>
-        <button data-act="selection" id="exportSelectionBtn">Nur Auswahl exportieren</button>
-        <button data-act="split">In mehrere PDFs aufteilen…</button>
-      </div>
-    </div>
-    <div class="sep"></div>
     <button id="resetBtn" class="icon-only danger-ghost" title="Sitzung zurücksetzen">
       <svg class="icon-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a1 1 0 011-1h6a1 1 0 011 1v2m3 0-1 14a1 1 0 01-1 1H7a1 1 0 01-1-1L5 6"/></svg>
     </button>
   </div>
-  <input type="file" id="fileInput" accept="application/pdf,image/png,image/jpeg" multiple>
+  <input type="file" id="fileInput" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" multiple>
 </header>
 
 <div class="inline-bar" id="watermarkBar">
@@ -548,16 +541,23 @@
 
 <div class="bulk-bar" id="bulkBar">
   <span class="label" id="bulkCount">0 ausgewählt</span>
-  <button id="bulkRotL" title="Auswahl drehen">
-    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 15L4 10l5-5"/><path d="M4 10h10a6 6 0 010 12h-1"/></svg>
-  </button>
-  <button id="bulkRotR" title="Auswahl drehen">
-    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 15l5-5-5-5"/><path d="M20 10H10a6 6 0 000 12h1"/></svg>
-  </button>
-  <button id="bulkDup">Duplizieren</button>
-  <button id="bulkExtract">Als neues PDF exportieren</button>
-  <button id="bulkDel" class="danger-ghost">Entfernen</button>
-  <button id="bulkClear">Auswahl aufheben</button>
+  <span class="bulk-hint" id="bulkHint">Zum Herunterladen zuerst die Seiten markieren (Checkbox auf der Seite).</span>
+  <button id="bulkAll" title="Alle Seiten markieren">Alle markieren</button>
+  <span class="bulk-sel-only" style="display:contents;">
+    <button id="bulkRotL" title="Auswahl drehen">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 15L4 10l5-5"/><path d="M4 10h10a6 6 0 010 12h-1"/></svg>
+    </button>
+    <button id="bulkRotR" title="Auswahl drehen">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 15l5-5-5-5"/><path d="M20 10H10a6 6 0 000 12h1"/></svg>
+    </button>
+    <button id="bulkDup">Duplizieren</button>
+    <button id="bulkDel" class="danger-ghost">Entfernen</button>
+    <button id="bulkClear">Auswahl aufheben</button>
+    <button id="bulkExtract" class="primary">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/></svg>
+      Als neues PDF exportieren
+    </button>
+  </span>
 </div>
 
 <main>
@@ -765,9 +765,6 @@ const fileInput   = document.getElementById('fileInput');
 const addBtn      = document.getElementById('addBtn');
 const emptyAddBtn = document.getElementById('emptyAddBtn');
 const blankBtn    = document.getElementById('blankBtn');
-const exportBtn   = document.getElementById('exportBtn');
-const exportPopover = document.getElementById('exportPopover');
-const exportSelectionBtn = document.getElementById('exportSelectionBtn');
 const watermarkBtn = document.getElementById('watermarkBtn');
 const watermarkBar = document.getElementById('watermarkBar');
 const wmText = document.getElementById('wmText');
@@ -869,16 +866,52 @@ function updateUndoRedoButtons(){
 addBtn.addEventListener('click', () => fileInput.click());
 emptyAddBtn.addEventListener('click', () => fileInput.click());
 
+/* Dateityp robust erkennen: Mobile Browser (Android/iOS, Cloud-Anbieter) liefern
+   häufig file.type === '' oder 'application/octet-stream'. Deshalb zusätzlich
+   Dateiendung und Dateianfang (Magic Bytes) prüfen. */
+async function detectKind(file){
+  const t = (file.type || '').toLowerCase();
+  if (t === 'application/pdf') return { kind:'pdf' };
+  if (t === 'image/png')  return { kind:'image', mime:'image/png' };
+  if (t === 'image/jpeg' || t === 'image/jpg') return { kind:'image', mime:'image/jpeg' };
+  try{
+    const head = new Uint8Array(await file.slice(0, 8).arrayBuffer());
+    const asc = String.fromCharCode(...head);
+    if (asc.startsWith('%PDF')) return { kind:'pdf' };
+    if (head[0]===0x89 && asc.slice(1,4)==='PNG') return { kind:'image', mime:'image/png' };
+    if (head[0]===0xFF && head[1]===0xD8) return { kind:'image', mime:'image/jpeg' };
+  }catch(_){}
+  const name = (file.name || '').toLowerCase();
+  if (name.endsWith('.pdf')) return { kind:'pdf' };
+  if (name.endsWith('.png')) return { kind:'image', mime:'image/png' };
+  if (/\.jpe?g$/.test(name)) return { kind:'image', mime:'image/jpeg' };
+  if (t.startsWith('image/')) return { kind:'image', mime:t }; // z.B. webp/heic -> wird in addImageFile umgewandelt
+  return null;
+}
+
 async function processFiles(fileList){
-  const files = Array.from(fileList || []).filter(f =>
-    f.type === 'application/pdf' || f.type.startsWith('image/')
-  );
-  if (files.length === 0) return;
-  pushHistory();
-  for (const file of files){
-    if (file.type === 'application/pdf') await addPdfFile(file);
-    else if (file.type.startsWith('image/')) await addImageFile(file);
+  const all = Array.from(fileList || []);
+  if (all.length === 0) return;
+  const items = [];
+  const skipped = [];
+  for (const f of all){
+    const info = await detectKind(f);
+    if (info) items.push({ file:f, info }); else skipped.push(f.name || 'Datei');
   }
+  if (items.length === 0){
+    alert('Dieses Dateiformat wird nicht unterstützt. Bitte PDF, PNG oder JPG wählen.');
+    return;
+  }
+  pushHistory();
+  for (const { file, info } of items){
+    try{
+      if (info.kind === 'pdf') await addPdfFile(file);
+      else await addImageFile(file, info.mime);
+    }catch(err){
+      alert('Konnte \"' + (file.name || 'Datei') + '\" nicht laden: ' + (err && err.message ? err.message : err));
+    }
+  }
+  if (skipped.length) alert('Nicht unterstützt und übersprungen: ' + skipped.join(', '));
   render(); scheduleAutosave();
 }
 
@@ -1019,11 +1052,27 @@ function loadImageFromSrc(src){
     img.src = src;
   });
 }
-async function addImageFile(file){
-  const dataURL = await fileToDataURL(file);
-  const img = await loadImageFromSrc(dataURL);
+async function addImageFile(file, detectedMime){
+  let mime = detectedMime || file.type;
+  let dataURL = await fileToDataURL(file);
+  // data:-URL mit korrektem MIME-Typ sicherstellen (bei leerem file.type steht sonst application/octet-stream drin)
+  if (mime === 'image/png' || mime === 'image/jpeg'){
+    dataURL = dataURL.replace(/^data:[^;,]*/, 'data:' + mime);
+  }
+  let img = await loadImageFromSrc(dataURL);
+  if (mime !== 'image/png' && mime !== 'image/jpeg'){
+    // z.B. WebP/HEIC: per Canvas nach JPEG umwandeln, da pdf-lib nur PNG/JPG einbetten kann
+    const c = document.createElement('canvas');
+    c.width = img.naturalWidth; c.height = img.naturalHeight;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+    ctx.drawImage(img, 0, 0);
+    dataURL = c.toDataURL('image/jpeg', 0.92);
+    mime = 'image/jpeg';
+    img = await loadImageFromSrc(dataURL);
+  }
   pages.push({
-    uid: uid(), type:'image', dataURL, mimeType: file.type,
+    uid: uid(), type:'image', dataURL, mimeType: mime,
     pxWidth: img.naturalWidth, pxHeight: img.naturalHeight,
     rotation: 0, splitAfter:false
   });
@@ -1222,17 +1271,16 @@ function render(){
   emptyState.style.display = hasPages ? 'none' : 'block';
   grid.style.display = hasPages ? 'grid' : 'none';
   hintBar.style.display = hasPages ? 'flex' : 'none';
-  exportBtn.disabled = !hasPages;
   compressBtn.disabled = !hasPages;
   wmRemoveBtn.disabled = !hasPages;
   reverseBtn.disabled = pages.length < 2;
   countPill.textContent = pages.length + (pages.length === 1 ? ' Seite' : ' Seiten');
-  exportSelectionBtn.style.display = selected.size > 0 ? 'flex' : 'none';
 
   const splitMarks = pages.filter(p => p.splitAfter).length;
   markerCount.textContent = String(splitMarks);
 
-  bulkBar.style.display = selected.size > 0 ? 'flex' : 'none';
+  bulkBar.style.display = hasPages ? 'flex' : 'none';
+  bulkBar.classList.toggle('has-sel', selected.size > 0);
   bulkCount.textContent = selected.size + ' ausgewählt';
 
   grid.innerHTML = '';
@@ -1385,7 +1433,6 @@ function positionPopover(pop, anchorEl){
 }
 document.addEventListener('click', (e) => {
   if (cardMenu.classList.contains('open') && !cardMenu.contains(e.target)) closeCardMenu();
-  if (exportPopover.classList.contains('open') && !exportPopover.contains(e.target) && e.target !== exportBtn) exportPopover.classList.remove('open');
 });
 
 /* ============================= bulk bar actions ============================= */
@@ -1394,6 +1441,7 @@ document.getElementById('bulkRotR').addEventListener('click', () => rotatePages(
 document.getElementById('bulkDup').addEventListener('click', () => duplicatePages([...selected]));
 document.getElementById('bulkDel').addEventListener('click', () => deletePages([...selected]));
 document.getElementById('bulkClear').addEventListener('click', () => { selected.clear(); render(); });
+document.getElementById('bulkAll').addEventListener('click', () => { pages.forEach(p => selected.add(p.uid)); render(); });
 document.getElementById('bulkExtract').addEventListener('click', async () => {
   const subset = pages.filter(p => selected.has(p.uid));
   await exportWithPrompt(subset, 'auswahl.pdf');
@@ -2084,26 +2132,6 @@ wmClearBtn.addEventListener('click', () => {
 });
 headerText.addEventListener('input', () => { settings.headerText = headerText.value; refreshNavButtonStates(); scheduleAutosave(); });
 footerText.addEventListener('input', () => { settings.footerText = footerText.value; refreshNavButtonStates(); scheduleAutosave(); });
-
-/* ============================= export popover ============================= */
-exportBtn.addEventListener('click', (e) => {
-  e.stopPropagation();
-  positionPopover(exportPopover, exportBtn);
-  exportPopover.classList.toggle('open');
-});
-exportPopover.querySelector('[data-act="all"]').addEventListener('click', async () => {
-  exportPopover.classList.remove('open');
-  await exportWithPrompt(pages, 'zusammengefuehrt.pdf');
-});
-exportSelectionBtn.addEventListener('click', async () => {
-  exportPopover.classList.remove('open');
-  const subset = pages.filter(p => selected.has(p.uid));
-  await exportWithPrompt(subset, 'auswahl.pdf');
-});
-exportPopover.querySelector('[data-act="split"]').addEventListener('click', () => {
-  exportPopover.classList.remove('open');
-  openSplitModal();
-});
 
 /* ============================= split modal ============================= */
 function openSplitModal(){
